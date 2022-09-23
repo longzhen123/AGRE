@@ -193,7 +193,7 @@ def eval_ctr(model, pairs, paths_dict, args, relation_dict):
     pred_np[pred_np < 0.5] = 0
     pred_label = pred_np.tolist()
     acc = accuracy_score(true_label, pred_label)
-    return round(auc, 3), round(acc, 3)
+    return auc, acc
 
 
 def get_data(pairs, paths_dict, p):
@@ -219,8 +219,8 @@ def get_data(pairs, paths_dict, p):
     return paths_list, label_list, users, items
 
 
-def train(args, is_topk=False):
-    np.random.seed(555)
+def train(args):
+    np.random.seed(123)
     data_dir = './data/' + args.dataset + '/'
     train_set = np.load(data_dir + str(args.ratio) + '_train_set.npy').tolist()
     eval_set = np.load(data_dir + str(args.ratio) + '_eval_set.npy').tolist()
@@ -230,7 +230,6 @@ def train(args, is_topk=False):
     relation_dict = np.load(data_dir + str(args.ratio) + '_relation_dict.npy', allow_pickle=True).item()
     _, _, n_relation = load_kg(data_dir)
     n_entity = len(entity_list)
-    rec = np.load(data_dir + str(args.ratio) + '_rec.npy', allow_pickle=True).item()
     paths_dict = np.load(data_dir + str(args.ratio) + '_3_path_dict.npy', allow_pickle=True).item()
 
     model = AGRE(args, n_entity, n_relation+2)
@@ -284,15 +283,9 @@ def train(args, is_topk=False):
         eval_auc, eval_acc = eval_ctr(model, eval_set, paths_dict, args, relation_dict)
         test_auc, test_acc = eval_ctr(model, test_set, paths_dict, args, relation_dict)
 
-        print('epoch: %d \t train_auc: %.3f \t train_acc: %.3f \t '
-              'eval_auc: %.3f \t eval_acc: %.3f \t test_auc: %.3f \t test_acc: %.3f \t' %
+        print('epoch: %d \t train_auc: %.4f \t train_acc: %.4f \t '
+              'eval_auc: %.4f \t eval_acc: %.4f \t test_auc: %.4f \t test_acc: %.4f \t' %
               ((epoch + 1), train_auc, train_acc, eval_auc, eval_acc, test_auc, test_acc), end='\t')
-
-        precision_list = []
-        if is_topk:
-            scores = get_scores(model, rec, paths_dict, relation_dict, args.p)
-            precision_list = get_all_metrics(scores, test_records)[0]
-            print(precision_list, end='\t')
 
         train_auc_list.append(train_auc)
         train_acc_list.append(train_acc)
@@ -300,18 +293,15 @@ def train(args, is_topk=False):
         eval_acc_list.append(eval_acc)
         test_auc_list.append(test_auc)
         test_acc_list.append(test_acc)
-        all_precision_list.append(precision_list)
         end = time.clock()
         print('time: %d' % (end - start))
 
     indices = eval_auc_list.index(max(eval_auc_list))
     print(args.dataset, end='\t')
-    print('train_auc: %.3f \t train_acc: %.3f \t eval_auc: %.3f \t eval_acc: %.3f \t '
-          'test_auc: %.3f \t test_acc: %.3f \t' %
+    print('train_auc: %.4f \t train_acc: %.4f \t eval_auc: %.4f \t eval_acc: %.4f \t '
+          'test_auc: %.4f \t test_acc: %.4f \t' %
           (train_auc_list[indices], train_acc_list[indices], eval_auc_list[indices], eval_acc_list[indices],
-           test_auc_list[indices], test_acc_list[indices]), end='\t')
-
-    print(all_precision_list[indices])
+           test_auc_list[indices], test_acc_list[indices]))
 
     return eval_auc_list[indices], eval_acc_list[indices], test_auc_list[indices], test_acc_list[indices]
 
