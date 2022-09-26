@@ -31,7 +31,7 @@ class AGRE(nn.Module):
         self.weight_path = nn.Parameter(t.randn(args.p, args.p))
         self.weight_attention = nn.Linear(2*args.dim, 1)
 
-        # # # AGRE-r
+        # AGRE-r
         # self.rnn = nn.RNN(args.dim, args.dim, num_layers=1)
         # self.weight_predict = nn.Linear(args.dim, 1)
         # self.weight_path = nn.Parameter(t.randn(args.p, args.p))
@@ -51,7 +51,7 @@ class AGRE(nn.Module):
 
         h = self.rnn(embeddings)[0][-1]
 
-        h = h.reshape(-1, self.p, 2*self.dim)
+        h = h.reshape(-1, self.p, self.dim)
         h = t.relu(t.matmul(self.weight_path, h))
         #
         # attention
@@ -60,7 +60,7 @@ class AGRE(nn.Module):
         final_hidden_states = (attention * h).sum(dim=1)
 
         #
-        # # no attention
+        # no attention
         # final_hidden_states = h.mean(dim=1)
         #
         predicts = t.sigmoid(self.weight_predict(final_hidden_states).reshape(-1))
@@ -108,48 +108,6 @@ class AGRE(nn.Module):
             # embeddings_list.append(entities_embeddings.reshape(1, -1, self.dim))
     #
         return embeddings_list
-    #
-    # def forward(self, paths_list, relation_dict):
-    #     '''
-    #     AGRE-r
-    #     :param paths_list:
-    #     :param relation_dict:
-    #     :return:
-    #     '''
-    #
-    #     embeddings_list = self.get_embedding(paths_list, relation_dict)
-    #     embeddings = t.cat(embeddings_list, dim=0)
-    #     h = self.rnn(embeddings)[0][-1]
-    #     h = h.reshape(-1, self.p, self.dim)
-    #     h = t.relu(t.matmul(self.weight_path, h))
-    #     h = h.reshape(-1, self.p, self.dim)
-    #     attention = t.relu(self.weight_attention(h))  # (batch_size, p, 1)
-    #     attention = t.softmax(attention, dim=1)
-    #     final_hidden_states = (attention * h).sum(dim=1)
-    #
-    #     predicts = t.sigmoid(self.weight_predict(final_hidden_states).reshape(-1))
-    #
-    #     return predicts
-    #
-    # def get_embedding(self, paths_list, relation_dict):
-    #     '''
-    #     AGRE-r
-    #     :param paths_list:
-    #     :param relation_dict:
-    #     :return:
-    #     '''
-    #
-    #     embeddings_list = []
-    #     for i in range(self.path_len+1):
-    #         i_entity_list = []
-    #
-    #         for paths in paths_list:
-    #
-    #             i_entity_list.extend([path[i] for path in paths])
-    #
-    #         embeddings_list.append(self.entity_embedding_matrix[i_entity_list].reshape(1, -1, self.dim))
-    #
-    #     return embeddings_list
 
 
 def get_scores(model, rec, paths_dict, relation_dict, p):
@@ -188,7 +146,7 @@ def eval_ctr(model, pairs, paths_dict, args, relation_dict):
     true_label = [pair[2] for pair in pairs]
     auc = roc_auc_score(true_label, pred_label)
 
-    pred_np  = np.array(pred_label)
+    pred_np = np.array(pred_label)
     pred_np[pred_np >= 0.5] = 1
     pred_np[pred_np < 0.5] = 0
     pred_label = pred_np.tolist()
