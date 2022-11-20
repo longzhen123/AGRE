@@ -44,11 +44,15 @@ def get_paths(args):
     data_dir = './data/' + args.dataset + '/'
     ratings_np = load_ratings(data_dir)
     train_set, eval_set, test_set = data_split(ratings_np, args.ratio)
+    item_set = set(ratings_np[:, 1])
     user_set = set(ratings_np[:, 0])
     train_records = get_records(train_set)
-
+    eval_records = get_records(eval_set)
+    test_records = get_records(test_set)
+    rec = get_rec(train_records, eval_records, test_records, item_set)
     kg, entity_list = construct_kg(data_dir, train_records, user_set)
     relation_dict = get_relation_dict(kg)
+    # print(len(entity_list))
 
     path_dict = dict()
     new_train_set = []
@@ -98,19 +102,34 @@ def get_paths(args):
 
         path_dict[(user, item)] = paths
 
+    new_rec = dict()
+    for user in tqdm(rec):
+        new_rec[entity_list.index(user)] = [entity_list.index(i) for i in rec[user]]
+        new_user = entity_list.index(user)
+        for item in new_rec[new_user]:
+
+            paths = [path for path in list(nx.all_simple_paths(kg, new_user, item, cutoff=args.path_len)) if (len(path) == args.path_len + 1)]
+
+            if len(paths) > 64:
+                indices = np.random.choice(len(paths), 64, replace=False)
+                paths = [paths[i] for i in indices]
+
+            path_dict[(new_user, item)] = paths
+
     np.save(data_dir+str(args.ratio)+'_'+str(args.path_len)+'_path_dict.npy', path_dict)
     np.save(data_dir+str(args.ratio)+'_relation_dict.npy', relation_dict)
     np.save(data_dir+'_entity_list.npy', entity_list)
     np.save(data_dir + str(args.ratio)+'_train_set.npy', new_train_set)
     np.save(data_dir + str(args.ratio) + '_eval_set.npy', new_eval_set)
     np.save(data_dir + str(args.ratio)+'_test_set.npy', new_test_set)
+    np.save(data_dir + str(args.ratio)+'_rec.npy', new_rec)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset', type=str, default='yelp', help='dataset')
+    parser.add_argument('--dataset', type=str, default='ml', help='dataset')
     parser.add_argument('--path_len', type=int, default=3, help='The length of paths')
-    parser.add_argument('--ratio', type=float, default=1, help='The ratio of training set')
+    parser.add_argument('--ratio', type=float, default=0.8, help='The ratio of training set')
     args = parser.parse_args()
 
     get_paths(args)

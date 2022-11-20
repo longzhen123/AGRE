@@ -4,9 +4,8 @@ import torch.optim as optim
 import time
 import numpy as np
 from sklearn.metrics import roc_auc_score, accuracy_score
-
-from src.evaluate import get_all_metrics
-from src.load_base import get_records, load_kg
+from src.evaluate import get_hit, get_ndcg
+from src.load_base import load_kg
 
 
 class AGRE(nn.Module):
@@ -18,32 +17,22 @@ class AGRE(nn.Module):
         self.p = args.p
         self.n_relation = n_relation
         self.path_len = args.path_len
+
         entity_embedding_matrix = t.randn(n_entity, args.dim)
         nn.init.xavier_uniform_(entity_embedding_matrix)
         relation_embedding_matrix = t.randn(n_relation + 1, args.dim)
         nn.init.xavier_uniform_(relation_embedding_matrix)
+
         self.entity_embedding_matrix = nn.Parameter(entity_embedding_matrix)
         self.relation_embedding_matrix = nn.Parameter(relation_embedding_matrix)
 
-        # AGRE
-        self.rnn = nn.RNN(2*args.dim, 2*args.dim, num_layers=1)
-        self.weight_predict = nn.Linear(2*args.dim, 1)
+        self.rnn = nn.RNN(2 * args.dim, 2 * args.dim)
+        # self.rnn = nn.LSTM(2 * args.dim, args.dim)
+        self.weight_predict = nn.Linear(2 * args.dim, 1)
         self.weight_path = nn.Parameter(t.randn(args.p, args.p))
-        self.weight_attention = nn.Linear(2*args.dim, 1)
-
-        # AGRE-r
-        # self.rnn = nn.RNN(args.dim, args.dim, num_layers=1)
-        # self.weight_predict = nn.Linear(args.dim, 1)
-        # self.weight_path = nn.Parameter(t.randn(args.p, args.p))
-        # self.weight_attention = nn.Linear(args.dim, 1)
+        self.weight_attention = nn.Linear(2 * args.dim, 1)
 
     def forward(self, paths_list, relation_dict):
-        '''
-        AGRE
-        :param paths_list:
-        :param relation_dict:
-        :return:
-        '''
 
         embeddings_list = self.get_embedding(paths_list, relation_dict)
 
@@ -51,15 +40,14 @@ class AGRE(nn.Module):
 
         h = self.rnn(embeddings)[0][-1]
 
-        h = h.reshape(-1, self.p, self.dim)
-        h = t.relu(t.matmul(self.weight_path, h))
-        #
+        h = h.reshape(-1, self.p, 2 * self.dim)
+        h = t.sigmoid(t.matmul(self.weight_path, h))
+
         # attention
-        attention = t.relu(self.weight_attention(h))  # (batch_size, p, 1)
+        attention = t.sigmoid(self.weight_attention(h))  # (batch_size, p, 1)
         attention = t.softmax(attention, dim=1)
         final_hidden_states = (attention * h).sum(dim=1)
 
-        #
         # no attention
         # final_hidden_states = h.mean(dim=1)
         #
@@ -68,12 +56,6 @@ class AGRE(nn.Module):
         return predicts
 
     def get_embedding(self, paths_list, relation_dict):
-        '''
-        AGRE
-        :param paths_list:
-        :param relation_dict:
-        :return:
-        '''
 
         embeddings_list = []
         zeros = t.zeros(self.p, self.dim)
@@ -110,27 +92,23 @@ class AGRE(nn.Module):
         return embeddings_list
 
 
-def get_scores(model, rec, paths_dict, relation_dict, p):
-    scores = {}
+def eval_topk(model, rec, paths_dict, relation_dict, p, topk):
+    HR, NDCG = [], []
     model.eval()
-    for user in (rec):
+    for user in rec:
 
         pairs = [(user, item, -1) for item in rec[user]]
         paths_list, _, users, items = get_data(pairs, paths_dict, p)
 
         predict_list = model(paths_list, relation_dict).cpu().detach().numpy().tolist()
 
-        item_scores = dict()
-        i = 0
-        for item in rec[user]:
+        item_scores = {items[i]: predict_list[i] for i in range(len(pairs))}
+        item_list = list(dict(sorted(item_scores.items(), key=lambda x: x[1], reverse=True)).keys())[: topk]
+        HR.append(get_hit(items[-1], item_list))
+        NDCG.append(get_ndcg(items[-1], item_list))
 
-            item_scores[item] = predict_list[i]
-            i += 1
-
-        sorted_item_scores = sorted(item_scores.items(), key=lambda x: x[1], reverse=True)
-        scores[user] = [i[0] for i in sorted_item_scores]
     model.train()
-    return scores
+    return np.mean(HR), np.mean(NDCG)
 
 
 def eval_ctr(model, pairs, paths_dict, args, relation_dict):
@@ -162,8 +140,7 @@ def get_data(pairs, paths_dict, p):
     for pair in pairs:
         if len(paths_dict[(pair[0], pair[1])]):
             paths = paths_dict[(pair[0], pair[1])]
-            users.append(pair[0])
-            items.append(pair[1])
+
             if len(paths) >= p:
                 indices = np.random.choice(len(paths), p, replace=False)
             else:
@@ -174,21 +151,24 @@ def get_data(pairs, paths_dict, p):
             paths_list.append([])
 
         label_list.append(pair[2])
+        users.append(pair[0])
+        items.append(pair[1])
     return paths_list, label_list, users, items
 
 
-def train(args):
+def train(args, is_topk=False):
     np.random.seed(123)
     data_dir = './data/' + args.dataset + '/'
     train_set = np.load(data_dir + str(args.ratio) + '_train_set.npy').tolist()
     eval_set = np.load(data_dir + str(args.ratio) + '_eval_set.npy').tolist()
     test_set = np.load(data_dir + str(args.ratio) + '_test_set.npy').tolist()
-    test_records = get_records(test_set)
+
     entity_list = np.load(data_dir + '_entity_list.npy').tolist()
     relation_dict = np.load(data_dir + str(args.ratio) + '_relation_dict.npy', allow_pickle=True).item()
     _, _, n_relation = load_kg(data_dir)
     n_entity = len(entity_list)
-    paths_dict = np.load(data_dir + str(args.ratio) + '_3_path_dict.npy', allow_pickle=True).item()
+    paths_dict = np.load(data_dir + str(args.ratio) + '_' + str(args.path_len) + '_path_dict.npy', allow_pickle=True).item()
+    rec = np.load(data_dir + str(args.ratio) + '_rec.npy', allow_pickle=True).item()
 
     model = AGRE(args, n_entity, n_relation+2)
 
@@ -211,7 +191,8 @@ def train(args):
     eval_acc_list = []
     test_auc_list = []
     test_acc_list = []
-    all_precision_list = []
+    HR_list = []
+    NDCG_list = []
 
     for epoch in range(args.epochs):
         loss_sum = 0
@@ -245,12 +226,20 @@ def train(args):
               'eval_auc: %.4f \t eval_acc: %.4f \t test_auc: %.4f \t test_acc: %.4f \t' %
               ((epoch + 1), train_auc, train_acc, eval_auc, eval_acc, test_auc, test_acc), end='\t')
 
+        HR, NDCG = 0, 0
+        if is_topk:
+            HR, NDCG = eval_topk(model, rec, paths_dict, relation_dict, args.p, args.topk)
+            print('HR: %.4f NDCG: %.4f' % (HR, NDCG), end='\t')
+
         train_auc_list.append(train_auc)
         train_acc_list.append(train_acc)
         eval_auc_list.append(eval_auc)
         eval_acc_list.append(eval_acc)
         test_auc_list.append(test_auc)
         test_acc_list.append(test_acc)
+        HR_list.append(HR)
+        NDCG_list.append(NDCG)
+
         end = time.clock()
         print('time: %d' % (end - start))
 
@@ -259,7 +248,9 @@ def train(args):
     print('train_auc: %.4f \t train_acc: %.4f \t eval_auc: %.4f \t eval_acc: %.4f \t '
           'test_auc: %.4f \t test_acc: %.4f \t' %
           (train_auc_list[indices], train_acc_list[indices], eval_auc_list[indices], eval_acc_list[indices],
-           test_auc_list[indices], test_acc_list[indices]))
+           test_auc_list[indices], test_acc_list[indices]), end='\t')
+
+    print('HR: %.4f \t NDCG: %.4f' % (HR_list[indices], NDCG_list[indices]))
 
     return eval_auc_list[indices], eval_acc_list[indices], test_auc_list[indices], test_acc_list[indices]
 
