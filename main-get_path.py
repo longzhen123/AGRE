@@ -129,7 +129,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset', type=str, default='ml', help='dataset')
     parser.add_argument('--path_len', type=int, default=3, help='The length of paths')
-    parser.add_argument('--ratio', type=float, default=0.8, help='The ratio of training set')
+    parser.add_argument('--ratio', type=float, default=1, help='The ratio of training set')
     args = parser.parse_args()
 
     get_paths(args)
